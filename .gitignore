@@ -1,5 +1,7 @@
-#MP3 files
+#MP3 and WAV files
 *.mp3
+*.wav
+separated/htdemucs/*
 #DS Store
 .DS_Store
 #TODO list
