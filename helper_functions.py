@@ -96,8 +96,13 @@ def plot_chroma_accuracy(chroma_obj):
 
 
 def calculate_chroma_accuracy(D):
-    # Calculate the DTW distance
-    dtw_distance = np.sum(D)
-    accuracy = 1 / (1 + dtw_distance)  # Simple scaling of the distance to get an accuracy score between 0 and 1
-
+    # Get the DTW cost from the bottom-right cell of the cost matrix
+    dtw_distance = D[-1, -1]
+    
+    # Apply a more appropriate scaling factor
+    # Using exponential scaling to map DTW distances to [0,1]
+    # Lower alpha values make the scoring more lenient
+    alpha = 0.07
+    accuracy = np.exp(-alpha * dtw_distance)
+    
     print(f"Accuracy between original and cover performance: {accuracy:.2f}")
