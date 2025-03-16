@@ -1,77 +1,168 @@
-import pytest
 import numpy as np
 import librosa
 from unittest import mock
-from main import split_audio_file, load_in_mp3, reshape_mfccs, extract_musical_features, plot_chroma_accuracy, calculate_chroma_accuracy
+import unittest
+import time
+import cProfile
+import pstats
+import psutil
+import os
+from helper_functions import *
 
-# Test split_audio_file function
-@mock.patch("subprocess.run")
-def test_split_audio_file(mock_subprocess):
-    # Mock subprocess run output
-    mock_subprocess.return_value.returncode = 0
-    mock_subprocess.return_value.stdout = "Mocked: Separation completed successfully!"
-    
-    split_audio_file("test_audio.mp3")
-    mock_subprocess.assert_called_once()
+class TestAudioProcessing(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        """Initialize shared test data once for all tests"""
+        print("Initializing test data...")
+        
+        # Basic test parameters
+        cls.sample_length = 100
+        cls.n_chroma = 12
+        cls.sample_rate = 22050
+        cls.hop_length = 1024
+        
+        # Create sample data
+        cls.sample_chroma1 = np.random.rand(cls.n_chroma, cls.sample_length)
+        cls.sample_chroma2 = np.random.rand(cls.n_chroma, cls.sample_length)
+        
+        # Create sample onset data
+        cls.sample_onset1 = np.random.rand(cls.sample_length)
+        cls.sample_onset2 = np.random.rand(cls.sample_length)
+        
+        print("Test data initialized!")
 
-# Test load_in_mp3 function
-@mock.patch("librosa.load")
-def test_load_in_mp3(mock_load):
-    # Mock loading of audio files
-    mock_load.return_value = (np.random.rand(22050), 22050)
-    
-    original_audio, cover_audio = load_in_mp3("test_audio.mp3", "vocals", "cover_audio.mp3")
-    assert original_audio[0].shape == (22050,)
-    assert cover_audio[0].shape == (22050,)
+    def setUp(self):
+        """Runs before each test"""
+        print(f"\nStarting test: {self._testMethodName}")
+        self.processor = AudioProcessor()
 
-# Test reshape_mfccs function
-def test_reshape_mfccs():
-    # Generate sample data
-    y_original = np.random.rand(22050)
-    sr_original = 22050
-    y_cover = np.random.rand(21000)
-    sr_cover = 22050
-    
-    mfccs1, mfccs2 = reshape_mfccs(y_original, sr_original, y_cover, sr_cover)
-    
-    # Check if shapes match after padding
-    assert mfccs1.shape == mfccs2.shape
+    def tearDown(self):
+        """Runs after each test"""
+        print(f"Completed test: {self._testMethodName}\n")
 
-# Test extract_musical_features function
-@mock.patch("librosa.feature.chroma_cqt")
-@mock.patch("librosa.onset.onset_strength")
-def test_extract_musical_features(mock_onset, mock_chroma):
-    # Mock chroma and onset envelope extraction
-    mock_chroma.return_value = np.random.rand(12, 100)
-    mock_onset.return_value = np.random.rand(100)
-    
-    original_obj = [np.random.rand(22050), 22050]
-    cover_obj = [np.random.rand(22050), 22050]
-    
-    chroma_obj, onset_obj = extract_musical_features(original_obj, cover_obj)
-    
-    # Verify the output shapes
-    assert chroma_obj[0].shape == chroma_obj[1].shape
-    assert onset_obj[0].shape == onset_obj[1].shape
+    def test_dtw_performance(self):
+        """Test the performance of DTW computation"""
+        print("Testing DTW performance with small sample...")
+        start_time = time.time()
+        
+        profiler = cProfile.Profile()
+        profiler.enable()
+        
+        # Run DTW
+        D, wp = librosa.sequence.dtw(
+            X=self.sample_chroma1,
+            Y=self.sample_chroma2,
+            metric='cosine'
+        )
+        
+        profiler.disable()
+        end_time = time.time()
+        
+        stats = pstats.Stats(profiler).sort_stats('cumulative')
+        stats.print_stats(10)
+        
+        print(f"DTW computation took {end_time - start_time:.2f} seconds")
+        print(f"DTW matrix shape: {D.shape}")
+        
+        self.assertLess(end_time - start_time, 5.0, "DTW computation took too long")
 
-# Test plot_chroma_accuracy function
-@mock.patch("librosa.sequence.dtw")
-@mock.patch("librosa.display.specshow")
-def test_plot_chroma_accuracy(mock_specshow, mock_dtw):
-    # Mock DTW calculation and plotting
-    mock_dtw.return_value = (np.random.rand(10, 10), np.array([[0, 1], [2, 3]]))
-    chroma_obj = [np.random.rand(12, 100), np.random.rand(12, 100)]
-    
-    plot_chroma_accuracy(chroma_obj)
-    mock_specshow.assert_called_once()
+    def test_rhythm_comparison(self):
+        """Test the rhythm comparison functionality"""
+        print("Testing rhythm comparison...")
+        start_time = time.time()
+        
+        onset_obj = [self.sample_onset1, self.sample_onset2]
+        
+        profiler = cProfile.Profile()
+        profiler.enable()
+        
+        # Test rhythm comparison
+        rhythm_score = self.processor.compare_rhythm(onset_obj)
+        
+        profiler.disable()
+        end_time = time.time()
+        
+        stats = pstats.Stats(profiler).sort_stats('cumulative')
+        stats.print_stats(10)
+        
+        print(f"Rhythm comparison took {end_time - start_time:.2f} seconds")
+        print(f"Rhythm score: {rhythm_score:.2f}")
+        
+        self.assertGreaterEqual(rhythm_score, 0.0)
+        self.assertLessEqual(rhythm_score, 1.0)
+        self.assertLess(end_time - start_time, 5.0, "Rhythm comparison took too long")
 
-# Test calculate_chroma_accuracy function
-def test_calculate_chroma_accuracy():
-    # Mock distance matrix
-    D = np.random.rand(10, 10)
-    
-    # Capture print output
-    with mock.patch("builtins.print") as mock_print:
-        calculate_chroma_accuracy(D)
-        mock_print.assert_called_once()
+    def test_combined_scoring(self):
+        """Test the combined pitch and rhythm scoring"""
+        print("Testing combined scoring...")
+        
+        # Create sample DTW matrix
+        D = np.random.rand(50, 50)
+        rhythm_score = 0.75  # Sample rhythm score
+        
+        # Test combined scoring
+        combined_score = self.processor.calculate_accuracy(D, rhythm_score)
+        
+        print(f"Combined score: {combined_score:.2f}")
+        
+        self.assertGreaterEqual(combined_score, 0.0)
+        self.assertLessEqual(combined_score, 1.0)
+
+    def test_feature_extraction(self):
+        """Test the feature extraction performance"""
+        print("Testing feature extraction...")
+        
+        # Create sample audio data
+        duration = 2  # seconds
+        t = np.linspace(0, duration, int(self.sample_rate * duration))
+        sample_audio = np.sin(2 * np.pi * 440 * t)  # 440 Hz sine wave
+        
+        start_time = time.time()
+        profiler = cProfile.Profile()
+        profiler.enable()
+        
+        # Extract features
+        chroma = librosa.feature.chroma_cqt(
+            y=sample_audio,
+            sr=self.sample_rate,
+            norm=2,
+            hop_length=self.hop_length
+        )
+        
+        profiler.disable()
+        end_time = time.time()
+        
+        stats = pstats.Stats(profiler).sort_stats('cumulative')
+        stats.print_stats(10)
+        
+        print(f"Feature extraction took {end_time - start_time:.2f} seconds")
+        print(f"Chroma shape: {chroma.shape}")
+        
+        self.assertLess(end_time - start_time, 5.0, "Feature extraction took too long")
+
+    def test_memory_usage(self):
+        """Test memory usage during processing"""
+        print("Testing memory usage...")
+        import psutil
+        import os
+        
+        process = psutil.Process(os.getpid())
+        initial_memory = process.memory_info().rss / 1024 / 1024
+        
+        # Run complete analysis
+        chroma_obj = [self.sample_chroma1, self.sample_chroma2]
+        onset_obj = [self.sample_onset1, self.sample_onset2]
+        
+        D, wp, rhythm_score = self.processor.compute_similarity(chroma_obj, onset_obj)
+        accuracy = self.processor.calculate_accuracy(D, rhythm_score)
+        
+        final_memory = process.memory_info().rss / 1024 / 1024
+        memory_used = final_memory - initial_memory
+        
+        print(f"Memory usage: {memory_used:.2f} MB")
+        self.assertLess(memory_used, 1000, "Memory usage exceeded 1GB")
+
+if __name__ == '__main__':
+    print("Starting audio processing tests...")
+    unittest.main(verbosity=2)
 
