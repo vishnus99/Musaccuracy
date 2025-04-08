@@ -35,6 +35,7 @@ The app uses a weighted scoring system to combine the pitch and rhythmic accurac
 - Chromagram: https://en.wikipedia.org/wiki/Chromagram
 
 ## Example Chromagram Comparison
+![Figure_1](https://github.com/user-attachments/assets/9835daf3-6e04-4523-88e5-2be4adbda1ef)
 
 
 
